@@ -15,7 +15,7 @@
           "kind": "bin"
         }
       },
-      "args": [],
+      "args": ["--volumes", "localhost:3000,localhost:3001,localhost:3002"],
       "cwd": "${workspaceFolder}"
     },
     {

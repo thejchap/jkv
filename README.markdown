@@ -1,5 +1,9 @@
 # jkv
 
+## roadmap
+
+- [ ] map key to volumes
+
 ## api
 
 - GET /key
@@ -9,6 +13,6 @@
 ## usage
 
 ```bash
-curl -v -L -X PUT -d myval localhost:8000/mykey
-curl -v -L localhost:8000/mykey
+curl -i -L -X PUT -d myval localhost:8000/mykey
+curl -i -L localhost:8000/mykey
 ```

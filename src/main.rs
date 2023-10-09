@@ -1,39 +1,84 @@
 #[macro_use]
 extern crate rocket;
-use rocket::{http::Status, State};
+extern crate log;
+use clap::Parser;
+use rocket::{
+    http::{Header, Status},
+    response::Responder,
+    State,
+};
 use std::{collections::HashMap, sync::RwLock, vec};
-struct App {
-    db: RwLock<HashMap<String, String>>,
+#[derive(Debug)]
+struct Record {
     volumes: Vec<String>,
+    value: String,
 }
-impl App {
-    fn new() -> Self {
-        App {
-            db: RwLock::new(HashMap::new()),
-            volumes: vec![],
-        }
+#[derive(Responder)]
+#[response(status = 200, content_type = "plain")]
+struct RecordResponse {
+    inner: String,
+    key_volumes: Header<'static>,
+}
+#[derive(Debug)]
+struct App {
+    db: RwLock<HashMap<String, Record>>,
+    volumes: Vec<String>,
+    replicas: u8,
+}
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(short, long)]
+    volumes: String,
+    #[arg(short, long, default_value_t = 3)]
+    replicas: u8,
+}
+#[get("/<k>")]
+fn get(app: &State<App>, k: &str) -> Result<RecordResponse, Status> {
+    let db = app.db.read().unwrap();
+    match db.get(k) {
+        Some(r) => Ok(RecordResponse {
+            inner: r.value.to_string(),
+            key_volumes: Header::new("Key-Volumes", r.volumes[0..app.replicas as usize].join(",")),
+        }),
+        None => Err(Status::NotFound),
     }
 }
-#[get("/<key>")]
-fn get(app: &State<App>, key: &str) -> Result<String, Status> {
-    let db = app.db.read().unwrap();
-    dbg!(app.volumes.to_owned());
-    db.get(key)
-        .map(|val| val.to_string())
-        .ok_or(Status::NotFound)
-}
-#[put("/<key>", data = "<val>")]
-fn put(app: &State<App>, key: &str, val: &str) -> Status {
+#[put("/<k>", data = "<v>")]
+fn put(app: &State<App>, k: &str, v: &str) -> Status {
+    if v.is_empty() {
+        return Status::BadRequest;
+    }
     let mut db = app.db.write().unwrap();
-    if db.contains_key(key) {
+    if db.contains_key(k) {
         return Status::Conflict;
     }
-    db.insert(key.to_string(), val.to_string());
+    let r = Record {
+        volumes: app.volumes.clone(),
+        value: v.to_string(),
+    };
+    db.insert(k.to_string(), r);
     Status::Created
+}
+#[delete("/<k>")]
+fn delete(app: &State<App>, k: &str) -> Status {
+    let mut db = app.db.write().unwrap();
+    match db.remove(k) {
+        Some(_) => Status::NoContent,
+        None => Status::NotFound,
+    }
 }
 #[launch]
 fn server() -> _ {
+    env_logger::init();
+    let args = Args::parse();
+    let volumes = args.volumes.split(',').map(str::to_string).collect();
+    let app = App {
+        db: RwLock::new(HashMap::new()),
+        volumes,
+        replicas: args.replicas,
+    };
     rocket::build()
-        .manage(App::new())
-        .mount("/", routes![put, get])
+        .manage(app)
+        .mount("/", routes![get, put, delete])
 }
