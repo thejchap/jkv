@@ -1,0 +1,36 @@
+version: "3.8"
+services:
+  leader:
+    build:
+      context: .
+      dockerfile: Dockerfile.leader
+    command:
+      - jkv
+      - --volumes
+      - localhost:3001,localhost:3002,localhost:3003
+    ports:
+      - "3000:8000"
+    environment:
+      - ROCKET_ADDRESS=0.0.0.0
+      - RUST_LOG=info
+      - ROCKET_CLI_COLORS=0
+  volume1: &base
+    build:
+      context: .
+      dockerfile: Dockerfile.volume
+    ports:
+      - "3001:8001"
+    environment:
+      - PORT=8001
+  volume2:
+    <<: *base
+    ports:
+      - "3002:8002"
+    environment:
+      - PORT=8002
+  volume3:
+    <<: *base
+    ports:
+      - "3003:8003"
+    environment:
+      - PORT=8003

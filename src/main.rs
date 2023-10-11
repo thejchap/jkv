@@ -78,6 +78,7 @@ fn server() -> _ {
         volumes,
         replicas: args.replicas,
     };
+    info!("volumes: {:?}. replicas: {:?}:", app.volumes, app.replicas);
     rocket::build()
         .manage(app)
         .mount("/", routes![get, put, delete])
