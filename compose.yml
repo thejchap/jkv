@@ -14,6 +14,10 @@ services:
       - ROCKET_ADDRESS=0.0.0.0
       - RUST_LOG=info
       - ROCKET_CLI_COLORS=0
+    depends_on:
+      - volume1
+      - volume2
+      - volume3
   volume1: &base
     build:
       context: .
