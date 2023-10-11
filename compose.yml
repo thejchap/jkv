@@ -7,7 +7,7 @@ services:
     command:
       - jkv
       - --volumes
-      - localhost:3001,localhost:3002,localhost:3003
+      - jkv-volume1-1:8001,jkv-volume2-1:8002,jkv-volume3-1:8003
     ports:
       - "3000:8000"
     environment:
