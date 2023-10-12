@@ -15,7 +15,7 @@ struct Record {
     value: String,
 }
 #[derive(Responder)]
-#[response(status = 303, content_type = "plain")]
+#[response(status = 302, content_type = "plain")]
 struct RecordResponse {
     inner: String,
     key_volumes: Header<'static>,
