@@ -7,17 +7,19 @@ use rocket::{
     response::Responder,
     State,
 };
-use std::{collections::HashMap, sync::RwLock, vec};
-#[derive(Debug)]
+use std::{cmp, collections::HashMap, vec};
+use tokio::sync::RwLock;
+#[derive(Debug, Clone)]
 struct Record {
     volumes: Vec<String>,
     value: String,
 }
 #[derive(Responder)]
-#[response(status = 200, content_type = "plain")]
+#[response(status = 303, content_type = "plain")]
 struct RecordResponse {
     inner: String,
     key_volumes: Header<'static>,
+    location: Header<'static>,
 }
 #[derive(Debug)]
 struct App {
@@ -34,35 +36,44 @@ struct Args {
     replicas: u8,
 }
 #[get("/<k>")]
-fn get(app: &State<App>, k: &str) -> Result<RecordResponse, Status> {
-    let db = app.db.read().unwrap();
+async fn get(app: &State<App>, k: &str) -> Result<RecordResponse, Status> {
+    let db = app.db.read().await;
     match db.get(k) {
         Some(r) => Ok(RecordResponse {
-            inner: r.value.to_string(),
+            inner: "".to_string(),
             key_volumes: Header::new("Key-Volumes", r.volumes[0..app.replicas as usize].join(",")),
+            location: Header::new("Location", format!("{}/{}", r.volumes[0], k)),
         }),
         None => Err(Status::NotFound),
     }
 }
 #[put("/<k>", data = "<v>")]
-fn put(app: &State<App>, k: &str, v: &str) -> Status {
+async fn put(app: &State<App>, k: &str, v: &str) -> Status {
     if v.is_empty() {
         return Status::BadRequest;
     }
-    let mut db = app.db.write().unwrap();
+    let mut db = app.db.write().await;
     if db.contains_key(k) {
         return Status::Conflict;
     }
     let r = Record {
-        volumes: app.volumes.clone(),
+        volumes: vec![app.volumes[0].clone()],
         value: v.to_string(),
     };
+    let client = reqwest::Client::new();
+    for volume in &r.volumes {
+        let url = format!("{}/{}", volume, r.value);
+        let res = client.put(url).body(v.to_string()).send().await;
+        if res.is_err() {
+            return Status::InternalServerError;
+        }
+    }
     db.insert(k.to_string(), r);
     Status::Created
 }
 #[delete("/<k>")]
-fn delete(app: &State<App>, k: &str) -> Status {
-    let mut db = app.db.write().unwrap();
+async fn delete(app: &State<App>, k: &str) -> Status {
+    let mut db = app.db.write().await;
     match db.remove(k) {
         Some(_) => Status::NoContent,
         None => Status::NotFound,
@@ -72,11 +83,12 @@ fn delete(app: &State<App>, k: &str) -> Status {
 fn server() -> _ {
     env_logger::init();
     let args = Args::parse();
-    let volumes = args.volumes.split(',').map(str::to_string).collect();
+    let volumes: Vec<String> = args.volumes.split(',').map(str::to_string).collect();
+    let volumes_len = volumes.len();
     let app = App {
         db: RwLock::new(HashMap::new()),
         volumes,
-        replicas: args.replicas,
+        replicas: cmp::min(args.replicas, volumes_len as u8),
     };
     warn!("volumes: {:?}. replicas: {:?}:", app.volumes, app.replicas);
     rocket::build()

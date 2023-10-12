@@ -13,6 +13,6 @@
 ## usage
 
 ```bash
-curl -i -L -X PUT -d myval localhost:3000/mykey
-curl -i -L localhost:3000/mykey
+curl -i -L -X PUT -d myval localhost:8000/mykey
+curl -i -L localhost:8000/mykey
 ```
