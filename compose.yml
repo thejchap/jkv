@@ -2,39 +2,18 @@ version: "3.8"
 services:
   leader:
     build:
-      context: .
       dockerfile: Dockerfile.leader
     command:
       - jkv
       - --volumes
-      - jkv-volume1-1:8001,jkv-volume2-1:8002,jkv-volume3-1:8003
+      - jkv-volume-1:8000,jkv-volume-2:8000,jkv-volume-3:8000
     ports:
       - "3000:8000"
     environment:
       - ROCKET_ADDRESS=0.0.0.0
-      - RUST_LOG=info
-      - ROCKET_CLI_COLORS=0
-    depends_on:
-      - volume1
-      - volume2
-      - volume3
-  volume1: &base
+      - RUST_LOG=warn
+  volume:
+    deploy:
+      replicas: 3
     build:
-      context: .
       dockerfile: Dockerfile.volume
-    ports:
-      - "3001:8001"
-    environment:
-      - PORT=8001
-  volume2:
-    <<: *base
-    ports:
-      - "3002:8002"
-    environment:
-      - PORT=8002
-  volume3:
-    <<: *base
-    ports:
-      - "3003:8003"
-    environment:
-      - PORT=8003
