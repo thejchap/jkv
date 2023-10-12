@@ -84,11 +84,12 @@ fn server() -> _ {
     env_logger::init();
     let args = Args::parse();
     let volumes: Vec<String> = args.volumes.split(',').map(str::to_string).collect();
-    let volumes_len = volumes.len();
+    let replicas = cmp::min(args.replicas, volumes.len() as u8);
+    let db = RwLock::new(HashMap::new());
     let app = App {
-        db: RwLock::new(HashMap::new()),
+        db,
         volumes,
-        replicas: cmp::min(args.replicas, volumes_len as u8),
+        replicas,
     };
     warn!("volumes: {:?}. replicas: {:?}:", app.volumes, app.replicas);
     rocket::build()
