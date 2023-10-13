@@ -35,17 +35,41 @@ struct Args {
     #[arg(short, long, default_value_t = 3)]
     replicas: u8,
 }
+fn key2volumes(key: &str, volumes: &[String], k: usize) -> Vec<String> {
+    let mut volumes_with_scores: Vec<(md5::Digest, &String)> = volumes
+        .iter()
+        .map(|v| {
+            let d = md5::compute(format!("{}{}", v, key));
+            (d, v)
+        })
+        .collect();
+    volumes_with_scores.sort_by(|a, b| a.0.cmp(&b.0));
+    volumes_with_scores.truncate(k);
+    volumes_with_scores
+        .iter()
+        .map(|(_, v)| v.to_string())
+        .collect()
+}
 #[get("/<k>")]
 async fn get(app: &State<App>, k: &str) -> Result<RecordResponse, Status> {
     let db = app.db.read().await;
-    match db.get(k) {
-        Some(r) => Ok(RecordResponse {
-            inner: "".to_string(),
-            key_volumes: Header::new("Key-Volumes", r.volumes[0..app.replicas as usize].join(",")),
-            location: Header::new("Location", format!("{}/{}", r.volumes[0], k)),
-        }),
-        None => Err(Status::NotFound),
+    let record = db.get(k);
+    if record.is_none() {
+        return Err(Status::NotFound);
     }
+    let client = reqwest::Client::new();
+    for volume in &record.unwrap().volumes {
+        let url = format!("{}/{}", volume, k);
+        let res = client.head(url).send().await;
+        if res.is_ok() && res.unwrap().status().is_success() {
+            return Ok(RecordResponse {
+                inner: "".to_string(),
+                key_volumes: Header::new("Key-Volumes", record.unwrap().volumes.join(",")),
+                location: Header::new("Location", format!("{}/{}", volume, k)),
+            });
+        }
+    }
+    Err(Status::NotFound)
 }
 #[put("/<k>", data = "<v>")]
 async fn put(app: &State<App>, k: &str, v: &str) -> Status {
@@ -56,14 +80,15 @@ async fn put(app: &State<App>, k: &str, v: &str) -> Status {
     if db.contains_key(k) {
         return Status::Conflict;
     }
+    let volumes = key2volumes(k, app.volumes.as_slice(), app.replicas as usize);
     let r = Record {
-        volumes: vec![app.volumes[0].clone()],
+        volumes,
         value: v.to_string(),
     };
     let client = reqwest::Client::new();
     for volume in &r.volumes {
-        let url = format!("{}/{}", volume, r.value);
-        let res = client.put(url).body(v.to_string()).send().await;
+        let url = format!("{}/{}", volume, k);
+        let res = client.put(url).body(r.value.to_string()).send().await;
         if res.is_err() {
             return Status::InternalServerError;
         }
