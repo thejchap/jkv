@@ -16,7 +16,7 @@ struct Record {
 }
 #[derive(Responder)]
 #[response(status = 302, content_type = "plain")]
-struct RecordResponse {
+struct VolumeRedirect {
     inner: String,
     key_volumes: Header<'static>,
     location: Header<'static>,
@@ -51,7 +51,7 @@ fn key2volumes(key: &str, volumes: &[String], k: usize) -> Vec<String> {
         .collect()
 }
 #[get("/<k>")]
-async fn get(app: &State<App>, k: &str) -> Result<RecordResponse, Status> {
+async fn get(app: &State<App>, k: &str) -> Result<VolumeRedirect, Status> {
     let db = app.db.read().await;
     let record = db.get(k);
     if record.is_none() {
@@ -62,7 +62,7 @@ async fn get(app: &State<App>, k: &str) -> Result<RecordResponse, Status> {
         let url = format!("{}/{}", volume, k);
         let res = client.head(url).send().await;
         if res.is_ok() && res.unwrap().status().is_success() {
-            return Ok(RecordResponse {
+            return Ok(VolumeRedirect {
                 inner: "".to_string(),
                 key_volumes: Header::new("Key-Volumes", record.unwrap().volumes.join(",")),
                 location: Header::new("Location", format!("{}/{}", volume, k)),
@@ -90,6 +90,7 @@ async fn put(app: &State<App>, k: &str, v: &str) -> Status {
         let url = format!("{}/{}", volume, k);
         let res = client.put(url).body(r.value.to_string()).send().await;
         if res.is_err() {
+            error!("put error: {:?}", res.err().unwrap());
             return Status::InternalServerError;
         }
     }
