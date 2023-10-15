@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate rocket;
 extern crate log;
+use base64::{engine::general_purpose, Engine as _};
 use clap::Parser;
 use rocket::{
     http::{Header, Status},
@@ -50,6 +51,11 @@ fn key2volumes(key: &str, volumes: &[String], k: usize) -> Vec<String> {
         .map(|(_, v)| v.to_string())
         .collect()
 }
+fn key2path(key: &str) -> String {
+    let d = md5::compute(key);
+    let b64 = general_purpose::STANDARD_NO_PAD.encode(key);
+    format!("{:x}/{:x}/{}", d[0], d[1], b64)
+}
 #[get("/<k>")]
 async fn get(app: &State<App>, k: &str) -> Result<VolumeRedirect, Status> {
     let db = app.db.read().await;
@@ -59,13 +65,14 @@ async fn get(app: &State<App>, k: &str) -> Result<VolumeRedirect, Status> {
     }
     let client = reqwest::Client::new();
     for volume in &record.unwrap().volumes {
-        let url = format!("{}/{}", volume, k);
-        let res = client.head(url).send().await;
+        let remote_path = key2path(k);
+        let url = format!("{}/{}", volume, remote_path);
+        let res = client.head(&url).send().await;
         if res.is_ok() && res.unwrap().status().is_success() {
             return Ok(VolumeRedirect {
                 inner: "".to_string(),
                 key_volumes: Header::new("Key-Volumes", record.unwrap().volumes.join(",")),
-                location: Header::new("Location", format!("{}/{}", volume, k)),
+                location: Header::new("Location", url),
             });
         }
     }
@@ -87,7 +94,9 @@ async fn put(app: &State<App>, k: &str, v: &str) -> Status {
     };
     let client = reqwest::Client::new();
     for volume in &r.volumes {
-        let url = format!("{}/{}", volume, k);
+        let remote_path = key2path(k);
+        let url = format!("{}/{}", volume, remote_path);
+        dbg!(&url);
         let res = client.put(url).body(r.value.to_string()).send().await;
         if res.is_err() {
             error!("put error: {:?}", res.err().unwrap());

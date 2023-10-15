@@ -691,6 +691,7 @@ checksum = "af150ab688ff2122fcef229be89cb50dd66af9e01a4ff320cc137eecc9bacc38"
 name = "jkv"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "clap",
  "env_logger",
  "log",
