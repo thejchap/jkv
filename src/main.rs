@@ -2,13 +2,14 @@
 extern crate rocket;
 extern crate log;
 use clap::Parser;
+use heed::{types as heedtypes, Database, EnvOpenOptions};
 use jkv::{key2path, key2volumes};
 use rocket::{
     http::{Header, Status},
     response::Responder,
     State,
 };
-use std::{cmp, collections::HashMap, vec};
+use std::{cmp, collections::HashMap, fs, path::Path, vec};
 use tokio::sync::RwLock;
 #[derive(Debug, Clone)]
 struct Record {
@@ -22,9 +23,10 @@ struct VolumeRedirect {
     key_volumes: Header<'static>,
     location: Header<'static>,
 }
-#[derive(Debug)]
 struct App {
     db: RwLock<HashMap<String, Record>>,
+    heeddb: Database<heedtypes::Str, heedtypes::Str>,
+    heedenv: heed::Env,
     volumes: Vec<String>,
     replicas: u8,
 }
@@ -76,13 +78,17 @@ async fn put(app: &State<App>, k: &str, v: &str) -> Status {
     for volume in &r.volumes {
         let remote_path = key2path(k);
         let url = format!("{}/{}", volume, remote_path);
-        dbg!(&url);
         let res = client.put(url).body(r.value.to_string()).send().await;
         if res.is_err() {
             error!("put error: {:?}", res.err().unwrap());
             return Status::InternalServerError;
         }
     }
+    let mut wtxn = app.heedenv.write_txn().unwrap();
+    app.heeddb
+        .put(&mut wtxn, k, r.volumes.join(",").as_str())
+        .unwrap();
+    wtxn.commit().unwrap();
     db.insert(k.to_string(), r);
     Status::Created
 }
@@ -101,10 +107,17 @@ fn server() -> _ {
     let volumes: Vec<String> = args.volumes.split(',').map(str::to_string).collect();
     let replicas = cmp::min(args.replicas, volumes.len() as u8);
     let db = RwLock::new(HashMap::new());
+    fs::create_dir_all(Path::new("target").join("jkv.mdb")).unwrap();
+    let heedenv = EnvOpenOptions::new()
+        .open(Path::new("target").join("jkv.mdb"))
+        .unwrap();
+    let heeddb: Database<heedtypes::Str, heedtypes::Str> = heedenv.create_database(None).unwrap();
     let app = App {
         db,
         volumes,
         replicas,
+        heeddb,
+        heedenv,
     };
     warn!("volumes: {:?}. replicas: {:?}:", app.volumes, app.replicas);
     rocket::build()
