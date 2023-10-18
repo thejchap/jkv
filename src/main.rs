@@ -9,7 +9,12 @@ use rocket::{
     response::Responder,
     State,
 };
+use rocket_db_pools::sqlx;
+use rocket_db_pools::{Connection, Database as SqliteDatabase};
 use std::{cmp, fs, path::Path, vec};
+#[derive(SqliteDatabase)]
+#[database("index")]
+struct Index(sqlx::SqlitePool);
 #[derive(Debug, Clone)]
 struct Record {
     volumes: Vec<String>,
@@ -37,7 +42,11 @@ struct Args {
     replicas: u8,
 }
 #[get("/<k>")]
-async fn get(app: &State<App>, k: &str) -> Result<VolumeRedirect, Status> {
+async fn get(
+    mut _db: Connection<Index>,
+    app: &State<App>,
+    k: &str,
+) -> Result<VolumeRedirect, Status> {
     let record = {
         let rtxn = app.heedenv.read_txn().unwrap();
         app.heeddb.get(&rtxn, k).unwrap().map(str::to_string)
@@ -116,5 +125,6 @@ fn server() -> _ {
     warn!("volumes: {:?}. replicas: {:?}:", app.volumes, app.replicas);
     rocket::build()
         .manage(app)
+        .attach(Index::init())
         .mount("/", routes![get, put, delete])
 }
