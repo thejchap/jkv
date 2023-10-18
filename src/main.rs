@@ -9,8 +9,7 @@ use rocket::{
     response::Responder,
     State,
 };
-use std::{cmp, collections::HashMap, fs, path::Path, vec};
-use tokio::sync::RwLock;
+use std::{cmp, fs, path::Path, vec};
 #[derive(Debug, Clone)]
 struct Record {
     volumes: Vec<String>,
@@ -24,7 +23,6 @@ struct VolumeRedirect {
     location: Header<'static>,
 }
 struct App {
-    db: RwLock<HashMap<String, Record>>,
     heeddb: Database<heedtypes::Str, heedtypes::Str>,
     heedenv: heed::Env,
     volumes: Vec<String>,
@@ -40,20 +38,27 @@ struct Args {
 }
 #[get("/<k>")]
 async fn get(app: &State<App>, k: &str) -> Result<VolumeRedirect, Status> {
-    let db = app.db.read().await;
-    let record = db.get(k);
+    let record = {
+        let rtxn = app.heedenv.read_txn().unwrap();
+        app.heeddb.get(&rtxn, k).unwrap().map(str::to_string)
+    };
     if record.is_none() {
         return Err(Status::NotFound);
     }
+    let volumes = record
+        .unwrap()
+        .split(',')
+        .map(str::to_string)
+        .collect::<Vec<String>>();
     let client = reqwest::Client::new();
-    for volume in &record.unwrap().volumes {
+    for volume in volumes {
         let remote_path = key2path(k);
         let url = format!("{}/{}", volume, remote_path);
         let res = client.head(&url).send().await;
         if res.is_ok() && res.unwrap().status().is_success() {
             return Ok(VolumeRedirect {
                 inner: "".to_string(),
-                key_volumes: Header::new("Key-Volumes", record.unwrap().volumes.join(",")),
+                key_volumes: Header::new("Key-Volumes", ""),
                 location: Header::new("Location", url),
             });
         }
@@ -64,10 +69,6 @@ async fn get(app: &State<App>, k: &str) -> Result<VolumeRedirect, Status> {
 async fn put(app: &State<App>, k: &str, v: &str) -> Status {
     if v.is_empty() {
         return Status::BadRequest;
-    }
-    let mut db = app.db.write().await;
-    if db.contains_key(k) {
-        return Status::Conflict;
     }
     let volumes = key2volumes(k, app.volumes.as_slice(), app.replicas as usize);
     let r = Record {
@@ -89,16 +90,11 @@ async fn put(app: &State<App>, k: &str, v: &str) -> Status {
         .put(&mut wtxn, k, r.volumes.join(",").as_str())
         .unwrap();
     wtxn.commit().unwrap();
-    db.insert(k.to_string(), r);
     Status::Created
 }
-#[delete("/<k>")]
-async fn delete(app: &State<App>, k: &str) -> Status {
-    let mut db = app.db.write().await;
-    match db.remove(k) {
-        Some(_) => Status::NoContent,
-        None => Status::NotFound,
-    }
+#[delete("/<_k>")]
+async fn delete(_app: &State<App>, _k: &str) -> Status {
+    panic!("not implemented")
 }
 #[launch]
 fn server() -> _ {
@@ -106,14 +102,12 @@ fn server() -> _ {
     let args = Args::parse();
     let volumes: Vec<String> = args.volumes.split(',').map(str::to_string).collect();
     let replicas = cmp::min(args.replicas, volumes.len() as u8);
-    let db = RwLock::new(HashMap::new());
     fs::create_dir_all(Path::new("target").join("jkv.mdb")).unwrap();
     let heedenv = EnvOpenOptions::new()
         .open(Path::new("target").join("jkv.mdb"))
         .unwrap();
     let heeddb: Database<heedtypes::Str, heedtypes::Str> = heedenv.create_database(None).unwrap();
     let app = App {
-        db,
         volumes,
         replicas,
         heeddb,
