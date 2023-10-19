@@ -1,3 +1,7 @@
+setup:
+	@rustup default nightly
+	@mkdir -p tmp
+	@cargo sqlx db create
 dev:
 	@pkill -f nginx || true
 	@PORT=3001 ./volume.sh /tmp/volume1/ &
@@ -11,5 +15,3 @@ dev:
 	http://localhost:3003,\
 	http://localhost:3004,\
 	http://localhost:3005
-check:
-	@cargo check
