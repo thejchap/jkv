@@ -13,7 +13,5 @@ log = "0.4.20"
 rocket = "=0.5.0-rc.3"
 md5 = "0.7.0"
 base64 = "0.21.4"
-sqlx = { version = "^0.6", features = [
-    "macros",
-    "migrate",
-], default-features = false }
+sqlx = { version = "0.6", features = ["macros"], default-features = false }
+sqlx-cli = { version = "0.6", default-features = false, features = ["sqlite"] }

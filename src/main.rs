@@ -1,7 +1,9 @@
 use base64::{engine::general_purpose, Engine as _};
 use clap::Parser;
 use rocket::{
+    delete,
     fairing::{self, AdHoc},
+    futures::future::try_join_all,
     get,
     http::{Header, Status},
     put,
@@ -82,15 +84,12 @@ async fn get(
             log::error!("failed to read from index: {}", e);
             Status::InternalServerError
         })?;
-    let volumes_str = match rec_opt {
+    let v = match rec_opt {
         Some(val) => val.unwrap(),
         None => return Err(Status::NotFound),
     };
-    let volumes = volumes_str
-        .split(',')
-        .map(str::to_string)
-        .collect::<Vec<String>>();
-    let key_volumes = Header::new("Key-Volumes", volumes_str);
+    let volumes = v.split(',').map(str::to_string).collect::<Vec<String>>();
+    let key_volumes = Header::new("Key-Volumes", v);
     for volume in volumes {
         let remote_path = key2path(k);
         let url = format!("{}/{}", volume, remote_path);
@@ -137,31 +136,57 @@ async fn put(
             log::error!("failed to write to index");
             Status::InternalServerError
         })?;
-    // TODO asyncify
-    for volume in volumes {
+    let tasks = volumes.iter().map(|volume| {
         let remote_path = key2path(k);
         let url = format!("{}/{}", volume, remote_path);
-        let response = app.client.put(url).body(v.to_string()).send().await;
-        if response.is_err() {
-            log::error!("put error: {:?}", response.err().unwrap());
-            return Err(Status::InternalServerError);
+        let v = v.to_string();
+        app.client.put(url).body(v).send()
+    });
+    match try_join_all(tasks).await {
+        Ok(_) => Ok(Status::Created),
+        Err(e) => {
+            log::error!("put error: {:?}", e);
+            Err(Status::InternalServerError)
         }
     }
-    Ok(Status::Created)
+}
+/// persist the value to volume servers with the configured replication factor
+#[delete("/<k>")]
+async fn delete(mut db: Connection<Index>, app: &State<App>, k: &str) -> Status {
+    let rec_opt = sqlx::query_scalar!("DELETE FROM kv WHERE key = ? RETURNING value", k)
+        .fetch_optional(&mut **db)
+        .await
+        .map_err(|e| {
+            log::error!("failed to read from index: {}", e);
+            Status::InternalServerError
+        });
+    let v = match rec_opt {
+        Ok(Some(val)) => val.unwrap(),
+        Ok(None) => return Status::NotFound,
+        Err(e) => return e,
+    };
+    let volumes = v.split(',').map(str::to_string).collect::<Vec<String>>();
+    let tasks = volumes.iter().map(|volume| {
+        let remote_path = key2path(k);
+        let url = format!("{}/{}", volume, remote_path);
+        app.client.delete(url).send()
+    });
+    match try_join_all(tasks).await {
+        Ok(_) => Status::NoContent,
+        Err(e) => {
+            log::error!("delete error: {:?}", e);
+            Status::InternalServerError
+        }
+    }
 }
 /// set up the index k/v table. using sqlite/sqlx because the
 /// k/v options in rust are kind of all over the place, don't have great async support (rocket is async)
 async fn create_table(rkt: Rocket<Build>) -> fairing::Result {
     match Index::fetch(&rkt) {
         Some(db) => {
-            match sqlx::query!(
-                r#"
-CREATE TABLE IF NOT EXISTS
-kv (key TEXT UNIQUE, value TEXT)
-"#
-            )
-            .execute(&db.0)
-            .await
+            match sqlx::query!("CREATE TABLE IF NOT EXISTS kv (key TEXT UNIQUE, value TEXT)")
+                .execute(&db.0)
+                .await
             {
                 Ok(_) => Ok(rkt),
                 Err(e) => {
@@ -191,5 +216,5 @@ fn server() -> _ {
         .manage(app)
         .attach(Index::init())
         .attach(AdHoc::try_on_ignite("create_table", create_table))
-        .mount("/", rocket::routes![get, put])
+        .mount("/", rocket::routes![get, put, delete])
 }

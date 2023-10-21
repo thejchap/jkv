@@ -7,17 +7,22 @@ a mini-clone of a [mini-clone](https://github.com/geohot/minikeyvalue) of [s3](h
 ```bash
 make setup
 make dev
+# or
+make docker
 ```
 
 ## usage
 
 ```bash
+# write to k replicas
 curl -i -L -X PUT -d beep localhost:8000/toot
+# redirect to replica
 curl -i -L localhost:8000/toot
-curl -i -L -X DELETE localhost:3000/toot
+# delete
+curl -i -L -X DELETE localhost:8000/toot
 ```
 
-## primary server
+## leader server
 
 ```bash
 a mini-clone of a mini-clone of s3

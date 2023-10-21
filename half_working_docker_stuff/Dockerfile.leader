@@ -1,7 +1,0 @@
-FROM rust:1.72 as builder
-WORKDIR /usr/src/jkv
-COPY . .
-RUN cargo build --release
-FROM rust:1.72-slim
-COPY --from=builder /usr/src/jkv/target/release/jkv /usr/local/bin/jkv
-CMD ["jkv"]
