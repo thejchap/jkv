@@ -7,8 +7,6 @@ a mini-clone of a [mini-clone](https://github.com/geohot/minikeyvalue) of [s3](h
 ```bash
 make setup
 make dev
-# or
-make docker
 ```
 
 ## usage
